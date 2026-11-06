@@ -75,7 +75,8 @@ void Ekf::controlGpsFusion(const imuSample &imu_delayed)
 			// Skip this sample
 			_gps_data_ready = false;
 
-			const bool using_gnss = _control_status.flags.gnss_vel || _control_status.flags.gnss_pos;
+			const bool using_gnss = _control_status.flags.gnss_vel || _control_status.flags.gnss_pos
+					|| _control_status.flags.gps_hgt || _control_status.flags.gnss_yaw;
 			const bool gnss_checks_pass_timeout = isTimedOut(_gnss_checks.getLastPassUs(), _params.reset_timeout_max);
 
 			if (using_gnss && gnss_checks_pass_timeout) {
@@ -451,10 +452,6 @@ void Ekf::resetHorizontalPositionToGnss(estimator_aid_source2d_s &aid_src)
 
 void Ekf::stopGnssFusion()
 {
-	if (_control_status.flags.gnss_vel || _control_status.flags.gnss_pos) {
-		_gnss_checks.reset();
-	}
-
 	stopGnssVelFusion();
 	stopGnssPosFusion();
 	stopGpsHgtFusion();
@@ -463,6 +460,18 @@ void Ekf::stopGnssFusion()
 #endif // CONFIG_EKF2_GNSS_YAW
 
 	_yawEstimator.reset();
+
+	// GNSS checks are shared by horizontal position/velocity, height and yaw.
+	// Keep them alive until every GNSS consumer has stopped. This also preserves
+	// the normal cleanup path when GNSS aiding is genuinely no longer needed.
+	if (!_control_status.flags.gnss_vel
+	    && !_control_status.flags.gnss_pos
+	    && !_control_status.flags.gps_hgt
+	    && !_control_status.flags.gnss_yaw
+	    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::VPOS))
+	    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::YAW))) {
+		_gnss_checks.reset();
+	}
 }
 
 void Ekf::stopGnssVelFusion()
@@ -471,8 +480,11 @@ void Ekf::stopGnssVelFusion()
 		ECL_INFO("stopping GNSS velocity fusion");
 		_control_status.flags.gnss_vel = false;
 
-		//TODO: what if gnss yaw or height is used?
-		if (!_control_status.flags.gnss_pos) {
+		if (!_control_status.flags.gnss_pos
+		    && !_control_status.flags.gps_hgt
+		    && !_control_status.flags.gnss_yaw
+		    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::VPOS))
+		    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::YAW))) {
 			_gnss_checks.reset();
 		}
 	}
@@ -484,8 +496,11 @@ void Ekf::stopGnssPosFusion()
 		ECL_INFO("stopping GNSS position fusion");
 		_control_status.flags.gnss_pos = false;
 
-		//TODO: what if gnss yaw or height is used?
-		if (!_control_status.flags.gnss_vel) {
+		if (!_control_status.flags.gnss_vel
+		    && !_control_status.flags.gps_hgt
+		    && !_control_status.flags.gnss_yaw
+		    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::VPOS))
+		    && !(_params.ekf2_gps_ctrl & static_cast<int32_t>(GnssCtrl::YAW))) {
 			_gnss_checks.reset();
 		}
 	}

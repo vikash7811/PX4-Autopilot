@@ -182,6 +182,57 @@ TEST_F(EkfGpsTest, resetToGpsPosition)
 			    previous_position + simulated_position_change, 1e-2f));
 }
 
+TEST_F(EkfGpsTest, retainGnssChecksForHeightWhenHorizontalFusionStops)
+{
+	// GIVEN: GNSS horizontal and height fusion are active
+	_ekf_wrapper.enableGpsHeightFusion();
+	_sensor_simulator.runSeconds(2);
+	ASSERT_TRUE(_ekf_wrapper.isIntendingGpsFusion());
+	ASSERT_TRUE(_ekf_wrapper.isIntendingGpsHeightFusion());
+
+	// WHEN: horizontal GNSS aiding is withdrawn but height remains configured
+	_ekf_wrapper.disableGpsFusion();
+	_sensor_simulator.runSeconds(1);
+
+	// THEN: the shared GNSS checks remain available to height fusion
+	EXPECT_FALSE(_ekf_wrapper.isIntendingGpsFusion());
+	EXPECT_TRUE(_ekf_wrapper.isIntendingGpsHeightFusion());
+}
+
+TEST_F(EkfGpsTest, resetGnssChecksWhenAllAidingStops)
+{
+	// GIVEN: GNSS horizontal and height fusion are active
+	_ekf_wrapper.enableGpsHeightFusion();
+	_sensor_simulator.runSeconds(2);
+	ASSERT_TRUE(_ekf_wrapper.isIntendingGpsHeightFusion());
+
+	// WHEN: all GNSS aiding is withdrawn
+	_ekf_wrapper.disableGpsFusion();
+	_ekf_wrapper.disableGpsHeightFusion();
+	_sensor_simulator.runSeconds(1);
+
+	// THEN: the existing all-off cleanup path remains intact
+	EXPECT_FALSE(_ekf_wrapper.isIntendingGpsFusion());
+	EXPECT_FALSE(_ekf_wrapper.isIntendingGpsHeightFusion());
+}
+
+TEST_F(EkfGpsTest, rejectGnssHeightAfterQualityBecomesInvalid)
+{
+	// GIVEN: GNSS height remains active after horizontal aiding is withdrawn
+	_ekf_wrapper.enableGpsHeightFusion();
+	_sensor_simulator.runSeconds(2);
+	_ekf_wrapper.disableGpsFusion();
+	_sensor_simulator.runSeconds(1);
+	ASSERT_TRUE(_ekf_wrapper.isIntendingGpsHeightFusion());
+
+	// WHEN: the actual GNSS quality subsequently becomes invalid
+	_sensor_simulator._gps.setFixType(0);
+	_sensor_simulator.runSeconds(8);
+
+	// THEN: retaining the checks does not make failed health permanent
+	EXPECT_FALSE(_ekf_wrapper.isIntendingGpsHeightFusion());
+}
+
 TEST_F(EkfGpsTest, gpsHgtToBaroFallback)
 {
 	// GIVEN: EKF that fuses GPS and flow, and in GPS height mode

@@ -449,6 +449,22 @@ hrt_call_invoke()
 			hrt_lock();
 		}
 
+		// The callback runs unlocked. It (or its work queue) may have already
+		// rearmed this entry through hrt_call_every/after. Inserting it twice
+		// corrupts the intrusive queue and can strand unrelated periodic timers.
+		bool already_queued = false;
+
+		for (sq_entry_t *queued = sq_peek(&callout_queue); queued; queued = sq_next(queued)) {
+			if (queued == &call->link) {
+				already_queued = true;
+				break;
+			}
+		}
+
+		if (already_queued) {
+			continue;
+		}
+
 		/* if the callout has a non-zero period, it has to be re-entered */
 		if (call->period != 0) {
 			// re-check call->deadline to allow for
